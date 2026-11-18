@@ -34,9 +34,24 @@ android {
         }
     }
 
+    // Personal fork: fixed signing key from CI secrets, so updates install over each other.
+    val personalKeystore = System.getenv("SIGNING_KEYSTORE")
+    signingConfigs {
+        if (personalKeystore != null) {
+            create("personal") {
+                storeFile = file(personalKeystore)
+                storeType = "pkcs12"
+                storePassword = System.getenv("SIGNING_PASSWORD")
+                keyAlias = "centuryplay"
+                keyPassword = System.getenv("SIGNING_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             isDebuggable = true
+            if (personalKeystore != null) signingConfig = signingConfigs.getByName("personal")
         }
         release {
             isMinifyEnabled = true
