@@ -2,7 +2,7 @@ name: build
 
 on:
   push:
-    branches: [master]
+    branches: [master, personal-hardening]
   pull_request:
 
 jobs:

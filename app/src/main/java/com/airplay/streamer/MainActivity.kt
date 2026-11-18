@@ -71,7 +71,7 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
         prefs = Prefs(this)
-        if (prefs.debugLogServer || BuildConfig.DEBUG) LogServer.start()
+        if (prefs.debugLogServer) LogServer.start()
         ShizukuManager.init(this)
 
         setupInsets()
