@@ -104,9 +104,6 @@ class RaopSink(
 
     // Stats
     private val packetsSent = AtomicLong()
-    private val diagTiming = AtomicLong()
-    private val diagControl = AtomicLong()
-    private var diagTicks = 0
     private val packetsResent = AtomicLong()
     private val bytesSent = AtomicLong()
     private var receiverLatency: Int? = null
@@ -168,9 +165,6 @@ class RaopSink(
             startHealthMonitor()
             LogServer.d(TAG, "$displayName: streaming ${if (useAlac) "ALAC" else "L16"}" +
                 "${if (useRsa) " (AES)" else ""}, receiver latency=${receiverLatency ?: "?"}, metadata=$metadataTypes")
-            LogServer.d(TAG, "diag: latencyFrames=${context.latencyFrames} seq=$seq rtpFirst=${rtp(firstFrame)} " +
-                "server audio=$serverAudioPort control=$serverControlPort, local control=${controlSocket?.localPort} " +
-                "timing=${timingSocket?.localPort} et=$encryptionTypes cn=$codecs")
         } catch (e: SinkException) {
             closeQuietly()
             throw e
@@ -300,8 +294,6 @@ class RaopSink(
                 try {
                     socket.receive(pkt)
                     val recvNanos = NtpClock.nowNanos()
-                    if (diagTiming.incrementAndGet() <= 2) LogServer.d(TAG, "diag: timing pkt len=${pkt.length} " +
-                        "type=0x${"%02x".format(buf[1].toInt() and 0xFF)} from ${pkt.address.hostAddress}:${pkt.port}")
                     if (pkt.length < 32 || (buf[1].toInt() and 0x7F) != 0x52) continue
                     val resp = ByteArray(32)
                     resp[0] = 0x80.toByte()
@@ -326,14 +318,10 @@ class RaopSink(
             while (!socket.isClosed) {
                 try {
                     socket.receive(pkt)
-                    val n = diagControl.incrementAndGet()
                     if (pkt.length >= 8 && (buf[1].toInt() and 0x7F) == 0x55) {
                         val first = ((buf[4].toInt() and 0xFF) shl 8) or (buf[5].toInt() and 0xFF)
                         val count = ((buf[6].toInt() and 0xFF) shl 8) or (buf[7].toInt() and 0xFF)
-                        if (n <= 5) LogServer.d(TAG, "diag: resend request first=$first count=$count (our seq now=$seq)")
                         resend(socket, pkt.address, pkt.port, first, count.coerceAtMost(BACKLOG))
-                    } else if (n <= 5) {
-                        LogServer.d(TAG, "diag: control pkt len=${pkt.length} type=0x%02x".format(buf[1].toInt() and 0xFF))
                     }
                 } catch (_: Exception) {
                     if (socket.isClosed) break
@@ -367,10 +355,7 @@ class RaopSink(
             while (running && !socket.isClosed) {
                 try {
                     if (context.timeline.isStarted) {
-                        val sp = syncPacket(first)
-                        if (first) LogServer.d(TAG, "diag: first sync " + sp.joinToString("") { "%02x".format(it) } +
-                            " (now frame=${context.timeline.frameAt(NtpClock.nowNanos())})")
-                        socket.send(DatagramPacket(sp, 20, address, serverControlPort))
+                        socket.send(DatagramPacket(syncPacket(first), 20, address, serverControlPort))
                         first = false
                     }
                     Thread.sleep(if (first) 20 else SYNC_INTERVAL_MS)
@@ -412,9 +397,6 @@ class RaopSink(
                     break
                 }
                 if (!running) break
-                if (diagTicks++ < 15) LogServer.d(TAG, "diag: sent=${packetsSent.get()} resent=${packetsResent.get()} " +
-                    "timingPkts=${diagTiming.get()} controlPkts=${diagControl.get()} " +
-                    "playingFrame=${context.playingFrameAt(NtpClock.nowNanos()) - startFrame} since first")
                 if (rtsp.probeClosed()) {
                     if (running && !intentionalStop) {
                         LogServer.d(TAG, "$displayName closed the connection")
@@ -435,8 +417,7 @@ class RaopSink(
         val db = volumeToDb(volume)
         val body = "volume: %.6f\r\n".format(java.util.Locale.US, db).toByteArray(Charsets.US_ASCII)
         runCatching {
-            val r = rtsp.request("SET_PARAMETER", uri(), sessionHeaders() + mapOf("Content-Type" to "text/parameters"), body, quiet = true)
-            LogServer.d(TAG, "diag: volume %.2f dB -> ${r.code}".format(java.util.Locale.US, db))
+            rtsp.request("SET_PARAMETER", uri(), sessionHeaders() + mapOf("Content-Type" to "text/parameters"), body, quiet = true)
         }.onFailure { LogServer.d(TAG, "volume failed: ${it.message}") }
     }
 
